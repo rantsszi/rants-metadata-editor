@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Rants' Metadata Editor</title>
+
+<meta name="description" content="Browser-based IL2CPP global-metadata.dat editor: inspect header, view and edit strings in place, and export." />
+<meta property="og:title" content="Rants' Metadata Editor" />
+<meta property="og:description" content="Inspect and in-place edit Unity IL2CPP global-metadata.dat strings right in your browser!" />
+<meta property="og:url" content="https://rantsszi.github.io/rants-metadata-editor/" />
+
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#070a17; --surface:#0f1430; --panel:#12183b;
+    --grid:#1b2350; --text:#eaf1ff; --muted:#97a6cf;
+    --neon:#47b6ff; --neon2:#ff5bd1; --ok:#5ff3c1; --bad:#ff6b8a; --warn:#ffd36e;
+    --border:#232c63;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,Ubuntu,Arial;
+    color:var(--text);
+    background:
+      radial-gradient(1200px 600px at 10% -10%, #17215a55, transparent 60%),
+      radial-gradient(900px 500px at 110% 10%, #38215a55, transparent 60%),
+      linear-gradient(180deg,#070a17,#070a17);
+    overflow-x:hidden;
+  }
+  header{padding:56px 16px 20px; text-align:center; position:relative; overflow:hidden}
+  header::before{
+    content:""; position:absolute; inset:-40% -40% auto -40%;
+    height:200%; background:conic-gradient(from 0deg, var(--neon), var(--neon2), var(--ok), var(--neon));
+    filter:blur(80px); opacity:.12; animation:spin 14s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  h1{margin:0; font-family:Orbitron,sans-serif; font-weight:800; font-size:2.1rem; letter-spacing:.6px;
+     text-shadow:0 0 14px #1c7ad8aa, 0 0 30px #1c7ad866;}
+  .subtitle{color:var(--muted); margin-top:10px}
+
+  main{max-width:1200px; margin:0 auto; padding:20px}
+  .bar{
+    display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-bottom:14px;
+  }
+  .btn, .sel, .text{
+    background:#0b1030; border:1px solid var(--border); color:var(--text);
+    padding:10px 14px; border-radius:10px; font-size:.95rem; cursor:pointer; transition:.18s;
+  }
+  .btn:hover{border-color:var(--neon); box-shadow:0 0 12px #47b6ff66; transform:translateY(-1px)}
+  .btn.primary{background:linear-gradient(135deg,#143a7a,#0c2a5e); border-color:#1b4e9a}
+  .btn.good{background:linear-gradient(135deg,#0f5a4a,#0d4237); border-color:#177c66}
+  .btn.warn{background:linear-gradient(135deg,#6b520e,#493c11); border-color:#7c6516}
+  .btn.danger{background:linear-gradient(135deg,#6d1f3b,#4b162a); border-color:#8a284a}
+  .text{min-width:240px}
+  .right{margin-left:auto}
+
+  .card{
+    background:linear-gradient(180deg, #12183b99, #0b103099);
+    border:1px solid var(--border); border-radius:16px; padding:16px;
+    box-shadow:0 10px 26px rgba(4,7,18,.45);
+  }
+  .grid{
+    border:1px solid var(--grid); border-radius:12px; overflow:hidden; margin-top:12px;
+  }
+  table{width:100%; border-collapse:separate; border-spacing:0}
+  thead th{
+    background:linear-gradient(180deg,#182155,#111741);
+    padding:10px; text-align:left; font-family:Orbitron; letter-spacing:.4px; font-size:.85rem;
+    border-bottom:1px solid var(--grid); color:#dce7ff;
+  }
+  td{padding:8px; border-bottom:1px solid var(--grid)}
+  tbody tr:last-child td{border-bottom:none}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+  .cell{width:100%; background:#0a0f29; color:var(--text); border:1px solid #223077; border-radius:8px; padding:8px; font-family:ui-monospace,Menlo,Consolas,monospace}
+  .cell:focus{outline:2px solid var(--neon)}
+  .hint{color:var(--muted); font-size:.9rem}
+  .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)}
+  footer{color:var(--muted); text-align:center; padding:30px 0}
+  .pill{display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border:1px solid var(--border); border-radius:999px; font-size:.85rem; color:#c9d6ff}
+  .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+  .space{height:2px; margin:18px 0; background:linear-gradient(90deg, transparent, #47b6ff, #ff5bd1, transparent); opacity:.6; animation:move 8s linear infinite}
+  @keyframes move{to{background-position:1200px 0}}
+  a{color:#8acbff}
+</style>
+</head>
+<body>
+  <header>
+    <h1>Rants' Metadata Editor</h1>
+    <div class="subtitle">IL2CPP <span class="mono">global-metadata.dat</span> — inspect header • edit strings in place • export safely</div>
+  </header>
+
+  <main>
+    <div class="card">
+      <div class="bar">
+        <button id="openBtn" class="btn">📂 Open <span class="mono">global-metadata.dat</span></button>
+        <input id="fileInput" type="file" accept=".dat,.bin" hidden />
+        <input id="search" class="text" placeholder="Search strings (regex ok)…" />
+        <button id="exportBtn" class="btn primary">⬇️ Download patched .dat</button>
+        <button id="saveMapBtn" class="btn">💾 Export string map (.json)</button>
+        <span class="pill">Strings: <span id="count">0</span></span>
+        <span class="pill">Version: <span id="ver">–</span></span>
+        <span class="pill">Sanity: <span id="sanity">–</span></span>
+        <span class="pill">String heap: <span id="heap">–</span></span>
+      </div>
+
+      <div class="hint" style="margin-top:-6px">
+        ⚠️ In-place editing only. New text must be ≤ original byte length. Shorter edits are padded with <span class="mono">\\0</span>.
+        Changing lengths would break offsets used by IL2CPP.
+      </div>
+
+      <div class="grid" style="margin-top:12px; max-height:55vh; overflow:auto">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:120px">Offset</th>
+              <th style="width:120px">Bytes</th>
+              <th>Original</th>
+              <th>Edited (≤ bytes)</th>
+              <th style="width:170px">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="row" style="margin-top:10px">
+        <span id="status" class="hint">Drop a file anywhere or click “Open”.</span>
+        <span class="right"></span>
+        <button id="zeroSelBtn" class="btn warn">🧨 Zero (delete) selected</button>
+        <button id="cloneSelBtn" class="btn">🧬 Clone row</button>
+        <button id="revertSelBtn" class="btn">↩️ Revert edited</button>
+      </div>
+    </div>
+
+    <div class="space"></div>
+
+    <div class="card">
+      <details>
+        <summary style="cursor:pointer; font-weight:600">Header & Sections (advanced)</summary>
+        <pre id="headerDump" class="mono" style="white-space:pre-wrap; background:#0a0f29; border:1px solid #223077; padding:12px; border-radius:8px; overflow:auto; max-height:40vh"></pre>
+      </details>
+      <p class="hint" style="margin-top:8px">This dump is best-effort across IL2CPP versions (24–29+). Unknown fields are listed as raw pairs.</p>
+    </div>
+
+    <footer>
+      Made for <a href="https://rantsszi.github.io/rants-metadata-editor/">rantsszi.github.io/rants-metadata-editor</a>.  
+      Use responsibly.
+    </footer>
+  </main>
+
+<script>
+(() => {
+  'use strict';
+
+  // ===== Helpers =====
+  const $ = id => document.getElementById(id);
+  const tbody = $('tbody');
+  const status = $('status');
+  const countEl = $('count'), verEl = $('ver'), sanityEl = $('sanity'), heapEl = $('heap');
+  const fileInput = $('fileInput'), openBtn = $('openBtn'), exportBtn = $('exportBtn');
+  const searchInput = $('search');
+  const headerDump = $('headerDump');
+  const zeroSelBtn = $('zeroSelBtn'), cloneSelBtn = $('cloneSelBtn'), revertSelBtn = $('revertSelBtn');
+  const saveMapBtn = $('saveMapBtn');
+
+  let originalBuf = null;        // ArrayBuffer of loaded file
+  let workBuf = null;            // Mutable copy
+  let u8 = null;                 // Uint8Array view
+  let dv = null;                 // DataView
+  let strings = [];              // [{offset, bytes, text, edited}]
+  let stringRegion = {start:0,end:0};
+
+  function setStatus(msg, cls=''){ status.textContent = msg; status.className = 'hint ' + cls; }
+
+  function readI32(off){ return dv.getInt32(off, true); }
+  function hex(n){ return '0x' + (n>>>0).toString(16).padStart(8,'0'); }
+
+  function detectHeader() {
+    const sanity = readI32(0);  // expected 0xFAB11BAF
+    const version = readI32(4); // commonly 24..29+
+    // Read next ~60 pairs of (offset,count/size)
+    const names = [
+      'stringLiteralOffset','stringLiteralCount',
+      'stringLiteralDataOffset','stringLiteralDataCount',
+      'stringOffset','stringCount',
+      'eventsOffset','eventsCount',
+      'propertiesOffset','propertiesCount',
+      'methodsOffset','methodsCount',
+      'fieldDefaultValuesOffset','fieldDefaultValuesCount',
+      'parameterDefaultValuesOffset','parameterDefaultValuesCount',
+      'fieldAndParameterDefaultValueDataOffset','fieldAndParameterDefaultValueDataCount',
+      'fieldMarshaledSizesOffset','fieldMarshaledSizesCount',
+      'parametersOffset','parametersCount',
+      'fieldsOffset','fieldsCount',
+      'genericParametersOffset','genericParametersCount',
+      'genericParameterConstraintsOffset','genericParameterConstraintsCount',
+      'genericContainersOffset','genericContainersCount',
+      'nestedTypesOffset','nestedTypesCount',
+      'interfacesOffset','interfacesCount',
+      'vtableMethodsOffset','vtableMethodsCount',
+      'interfaceOffsetsOffset','interfaceOffsetsCount',
+      'typeDefinitionsOffset','typeDefinitionsCount',
+      'imagesOffset','imagesCount',
+      'assembliesOffset','assembliesCount',
+      'metadataUsageListsOffset','metadataUsageListsCount',
+      'metadataUsagePairsOffset','metadataUsagePairsCount',
+      'fieldRefsOffset','fieldRefsCount',
+      'referencedAssembliesOffset','referencedAssembliesCount',
+      'attributesInfoOffset','attributesInfoCount',
+      'attributeTypesOffset','attributeTypesCount',
+      'unresolvedVirtualCallParameterTypesOffset','unresolvedVirtualCallParameterTypesCount',
+      'unresolvedVirtualCallParameterRangesOffset','unresolvedVirtualCallParameterRangesCount',
+      'windowsRuntimeTypeNamesOffset','windowsRuntimeTypeNamesSize',
+      'exportedTypeDefinitionsOffset','exportedTypeDefinitionsCount'
+    ];
+
+    const map = { sanity, version };
+    let off = 8;
+    for (let i=0;i<names.length;i+=2) {
+      const n1 = names[i], n2 = names[i+1];
+      const v1 = readI32(off); const v2 = readI32(off+4);
+      map[n1] = v1; map[n2] = v2;
+      off += 8;
+    }
+
+    // Collect all positive offsets to find the end of string heap
+    const offsets = [];
+    Object.keys(map).forEach(k=>{
+      if(k.endsWith('Offset') && typeof map[k]==='number' && map[k]>0) offsets.push(map[k]);
+    });
+    offsets.sort((a,b)=>a-b);
+
+    const stringStart = map.stringOffset || 0;
+    let stringEnd = originalBuf.byteLength;
+    for (const x of offsets) {
+      if (x > stringStart) { stringEnd = x; break; }
+    }
+    return {map, stringStart, stringEnd};
+  }
+
+  function decodeCString(u8, start, maxEnd){
+    let end = start;
+    while (end < maxEnd && u8[end] !== 0) end++;
+    const bytes = u8.slice(start, end);
+    const text = new TextDecoder('utf-8', {fatal:false}).decode(bytes);
+    return { text, bytesLength: bytes.length, endPlus1: Math.min(end+1, maxEnd) };
+  }
+
+  function scanStringHeap(start, end) {
+    const out = [];
+    let p = start;
+    // Basic sanity: require end > start
+    const hardLimit = Math.min(end, u8.length);
+    while (p < hardLimit) {
+      if (u8[p] === 0) { p++; continue; }
+      const {text, bytesLength, endPlus1} = decodeCString(u8, p, hardLimit);
+      // Keep non-empty ASCII/UTF-8 strings; ignore ultra-short garbage (1-char nulls are skipped)
+      if (bytesLength > 0) {
+        out.push({ offset: p, bytes: bytesLength+1, text, edited: text });
+      }
+      p = endPlus1;
+    }
+    return out;
+  }
+
+  function renderRows(list) {
+    tbody.innerHTML = '';
+    for (const row of list) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="mono">${hex(row.offset)}</td>
+        <td class="mono">${row.bytes}</td>
+        <td class="mono">${escapeHtml(row.text)}</td>
+        <td><input class="cell mono edit" maxlength="${Math.max(0,row.bytes-1)}" value="${escapeAttr(row.edited)}" /></td>
+        <td>
+          <button class="btn mini" data-act="apply">Apply</button>
+          <button class="btn mini" data-act="revert">Revert</button>
+          <button class="btn mini danger" data-act="zero">Zero</button>
+        </td>
+      `;
+      const input = tr.querySelector('.edit');
+      input.addEventListener('input', () => {
+        if (new TextEncoder().encode(input.value).length > row.bytes-1) {
+          input.value = trimToUtf8Bytes(input.value, row.bytes-1);
+        }
+      });
+      tr.querySelector('[data-act="apply"]').onclick = () => applyEdit(row, input.value);
+      tr.querySelector('[data-act="revert"]').onclick = () => { input.value = row.text; applyEdit(row, row.text); };
+      tr.querySelector('[data-act="zero"]').onclick = () => zeroOut(row);
+      tbody.appendChild(tr);
+    }
+  }
+
+  function applyEdit(row, newText) {
+    const enc = new TextEncoder();
+    const bytes = enc.encode(newText);
+    if (bytes.length > row.bytes-1) return; // guarded by UI
+    // Overwrite bytes, pad with zeros, keep trailing null
+    const start = row.offset;
+    u8.fill(0, start, start + row.bytes); // zero full slice (includes terminator)
+    u8.set(bytes, start);
+    row.edited = newText;
+    setStatus(`Applied at ${hex(row.offset)} (${bytes.length}/${row.bytes-1} bytes).`, 'ok');
+  }
+
+  function zeroOut(row) {
+    u8.fill(0, row.offset, row.offset + row.bytes);
+    row.edited = '';
+    setStatus(`Zeroed ${hex(row.offset)} (${row.bytes} bytes).`, 'warn');
+  }
+
+  function trimToUtf8Bytes(str, max){
+    const enc = new TextEncoder();
+    let low=0, high=str.length;
+    while (low < high) {
+      const mid = Math.ceil((low+high)/2);
+      const slice = str.slice(0, mid);
+      if (enc.encode(slice).length <= max) low = mid; else high = mid-1;
+    }
+    return str.slice(0, low);
+  }
+
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+  function escapeAttr(s){ return String(s).replace(/"/g,'&quot;'); }
+
+  function applyFilter() {
+    if (!searchInput.value.trim()) { renderRows(strings); countEl.textContent = strings.length; return; }
+    let rx;
+    try { rx = new RegExp(searchInput.value, 'i'); }
+    catch { setStatus('Invalid regex in search.', 'bad'); return; }
+    const filtered = strings.filter(r => rx.test(r.text) || rx.test(r.edited));
+    renderRows(filtered);
+    countEl.textContent = filtered.length;
+  }
+
+  function exportPatched() {
+    if (!workBuf) return;
+    const blob = new Blob([workBuf], {type:'application/octet-stream'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'global-metadata.patched.dat';
+    a.click();
+    setStatus('Downloaded patched file.', 'ok');
+  }
+
+  function exportMap() {
+    const map = strings.map(s => ({offset: s.offset, bytes: s.bytes, original: s.text, edited: s.edited}));
+    const blob = new Blob([JSON.stringify(map, null, 2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'string-map.json';
+    a.click();
+    setStatus('Exported string map.', 'ok');
+  }
+
+  function dumpHeader(map) {
+    const lines = [];
+    lines.push(`sanity: ${hex(map.sanity)} (${map.sanity===0xFAB11BAF ? 'OK' : 'unexpected'})`);
+    lines.push(`version: ${map.version}`);
+    Object.keys(map).forEach(k=>{
+      if (k==='sanity'||k==='version') return;
+      lines.push(`${k}: ${map[k]}`);
+    });
+    headerDump.textContent = lines.join('\n');
+  }
+
+  // ===== File IO / Main Flow =====
+  openBtn.onclick = () => fileInput.click();
+  fileInput.onchange = async e => {
+    const f = e.target.files?.[0]; if (!f) return;
+    await loadFile(f);
+  };
+
+  // Drag & drop
+  window.addEventListener('dragover', e => { e.preventDefault(); });
+  window.addEventListener('drop', async e => {
+    e.preventDefault();
+    const f = e.dataTransfer.files?.[0]; if (f) await loadFile(f);
+  });
+
+  async function loadFile(file) {
+    const buf = await file.arrayBuffer();
+    originalBuf = buf;
+    workBuf = buf.slice(0); // copy
+    u8 = new Uint8Array(workBuf);
+    dv = new DataView(workBuf);
+
+    const {map, stringStart, stringEnd} = detectHeader();
+    const okMagic = map.sanity === 0xFAB11BAF;
+    verEl.textContent = String(map.version ?? '–');
+    sanityEl.innerHTML = (okMagic ? `<span class="ok">${hex(map.sanity)} ✓</span>` : `<span class="bad">${hex(map.sanity)} ?</span>`);
+    stringRegion = {start: stringStart, end: stringEnd};
+    heapEl.textContent = `${hex(stringStart)} → ${hex(stringEnd)} (${stringEnd-stringStart} bytes)`;
+
+    dumpHeader(map);
+
+    if (!okMagic) setStatus('Warning: unexpected sanity magic. File may not be IL2CPP metadata.', 'warn');
+
+    strings = scanStringHeap(stringStart, stringEnd);
+    countEl.textContent = strings.length;
+    renderRows(strings);
+    setStatus(`Loaded ${file.name} • ${strings.length} strings found.`, 'ok');
+  }
+
+  searchInput.addEventListener('input', applyFilter);
+  exportBtn.onclick = exportPatched;
+  saveMapBtn.onclick = exportMap;
+
+  // bulk actions on the first visible/selected row (simple helpers)
+  function getFirstVisibleRow() {
+    const tr = tbody.querySelector('tr'); if (!tr) return null;
+    const offHex = tr.children[0].textContent;
+    const off = parseInt(offHex, 16);
+    return strings.find(s => s.offset === off) || null;
+  }
+  zeroSelBtn.onclick = () => { const r = getFirstVisibleRow(); if (r) zeroOut(r); };
+  cloneSelBtn.onclick = () => {
+    const r = getFirstVisibleRow(); if (!r) return;
+    strings.splice(strings.indexOf(r)+1, 0, {...r});
+    applyFilter();
+  };
+  revertSelBtn.onclick = () => {
+    const r = getFirstVisibleRow(); if (!r) return;
+    applyEdit(r, r.text);
+    applyFilter();
+  };
+
+})();
+</script>
+</body>
+</html>
