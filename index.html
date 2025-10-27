@@ -3,18 +3,17 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Rants' Metadata Editor!</title>
+<title>Rants' Metadata Editor</title>
 
-<meta name="description" content="Browser-based IL2CPP global-metadata.dat editor: inspect header, view and edit strings in place, and export." />
-<meta property="og:title" content="Rants' Metadata Editor!" />
-<meta property="og:description" content="Inspect and in-place edit Unity IL2CPP global-metadata.dat strings right in your browser!" />
+<meta name="description" content="Browser-based IL2CPP global-metadata.dat editor: stream-scan header, page through millions of strings, in-place edit, and export." />
+<meta property="og:title" content="Rants' Metadata Editor" />
+<meta property="og:description" content="Inspect and in-place edit Unity IL2CPP global-metadata.dat strings right in your browser — optimized for huge files." />
 <meta property="og:url" content="https://rantsszi.github.io/rants-metadata-editor/" />
 
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#070a17; --panel:#12183b;
-    --text:#eaf1ff; --muted:#97a6cf;
+    --bg:#070a17; --panel:#12183b; --text:#eaf1ff; --muted:#97a6cf;
     --neon:#47b6ff; --neon2:#ff5bd1; --ok:#5ff3c1; --bad:#ff6b8a; --warn:#ffd36e;
     --border:#232c63; --grid:#1b2350;
   }
@@ -22,190 +21,458 @@
   body{
     margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,Ubuntu,Arial;
     color:var(--text);
-    background:radial-gradient(1200px 600px at 10% -10%, #17215a55, transparent 60%),
-               radial-gradient(900px 500px at 110% 10%, #38215a55, transparent 60%),
-               linear-gradient(180deg,#070a17,#070a17);
+    background:
+      radial-gradient(1200px 600px at 10% -10%, #17215a55, transparent 60%),
+      radial-gradient(900px 500px at 110% 10%, #38215a55, transparent 60%),
+      linear-gradient(180deg,#070a17,#070a17);
   }
   header{padding:56px 16px 20px; text-align:center; position:relative;}
   header::before{
-    content:"";position:absolute;inset:-40% -40% auto -40%;
-    height:200%;background:conic-gradient(from 0deg,var(--neon),var(--neon2),var(--ok),var(--neon));
-    filter:blur(80px);opacity:.12;animation:spin 14s linear infinite;
+    content:""; position:absolute; inset:-40% -40% auto -40%;
+    height:200%; background:conic-gradient(from 0deg,var(--neon),var(--neon2),var(--ok),var(--neon));
+    filter:blur(80px); opacity:.12; animation:spin 14s linear infinite;
   }
   @keyframes spin{to{transform:rotate(360deg)}}
-  h1{margin:0;font-family:Orbitron,sans-serif;font-weight:800;font-size:2.1rem;
-     text-shadow:0 0 14px #1c7ad8aa,0 0 30px #1c7ad866;}
-  .subtitle{color:var(--muted);margin-top:10px}
-  main{max-width:1200px;margin:0 auto;padding:20px}
-  .bar{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:14px}
-  .btn,.text{
-    background:#0b1030;border:1px solid var(--border);color:var(--text);
-    padding:10px 14px;border-radius:10px;font-size:.95rem;cursor:pointer;transition:.18s;
-  }
-  .btn:hover{border-color:var(--neon);box-shadow:0 0 12px #47b6ff66;transform:translateY(-1px)}
-  .btn.primary{background:linear-gradient(135deg,#143a7a,#0c2a5e);border-color:#1b4e9a}
-  .btn.good{background:linear-gradient(135deg,#0f5a4a,#0d4237);border-color:#177c66}
-  .btn.warn{background:linear-gradient(135deg,#6b520e,#493c11);border-color:#7c6516}
-  .btn.danger{background:linear-gradient(135deg,#6d1f3b,#4b162a);border-color:#8a284a}
+  h1{margin:0; font-family:Orbitron,sans-serif; font-weight:800; font-size:2.1rem;
+     text-shadow:0 0 14px #1c7ad8aa, 0 0 30px #1c7ad866;}
+  .subtitle{color:var(--muted); margin-top:10px}
+  main{max-width:1200px; margin:0 auto; padding:20px}
   .card{background:linear-gradient(180deg,#12183b99,#0b103099);
-        border:1px solid var(--border);border-radius:16px;padding:16px;
+        border:1px solid var(--border); border-radius:16px; padding:16px;
         box-shadow:0 10px 26px rgba(4,7,18,.45);}
-  .grid{border:1px solid var(--grid);border-radius:12px;overflow:hidden;margin-top:12px}
-  table{width:100%;border-collapse:separate;border-spacing:0}
+  .bar, .footerbar{
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:center;
+  }
+  .btn,.text,.sel{
+    background:#0b1030; border:1px solid var(--border); color:var(--text);
+    padding:10px 14px; border-radius:10px; font-size:.95rem; cursor:pointer; transition:.18s;
+  }
+  .btn:hover{border-color:var(--neon); box-shadow:0 0 12px #47b6ff66; transform:translateY(-1px)}
+  .btn.primary{background:linear-gradient(135deg,#143a7a,#0c2a5e); border-color:#1b4e9a}
+  .btn.good{background:linear-gradient(135deg,#0f5a4a,#0d4237); border-color:#177c66}
+  .btn.warn{background:linear-gradient(135deg,#6b520e,#493c11); border-color:#7c6516}
+  .btn.danger{background:linear-gradient(135deg,#6d1f3b,#4b162a); border-color:#8a284a}
+  .grid{border:1px solid var(--grid); border-radius:12px; overflow:hidden; margin-top:12px}
+  table{width:100%; border-collapse:separate; border-spacing:0}
   thead th{background:linear-gradient(180deg,#182155,#111741);
-           padding:10px;text-align:left;font-family:Orbitron;font-size:.85rem;color:#dce7ff}
-  td{padding:8px;border-bottom:1px solid var(--grid)}
+           padding:10px; text-align:left; font-family:Orbitron; font-size:.85rem; color:#dce7ff}
+  td{padding:8px; border-bottom:1px solid var(--grid)}
   .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
-  .cell{width:100%;background:#0a0f29;color:var(--text);border:1px solid #223077;
-        border-radius:8px;padding:8px;font-family:ui-monospace,Menlo,Consolas,monospace}
+  .cell{width:100%; background:#0a0f29; color:var(--text); border:1px solid #223077;
+        border-radius:8px; padding:8px; font-family:ui-monospace,Menlo,Consolas,monospace}
   .cell:focus{outline:2px solid var(--neon)}
-  .hint{color:var(--muted);font-size:.9rem}
+  .hint{color:var(--muted); font-size:.9rem}
   .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)}
-  footer{color:var(--muted);text-align:center;padding:30px 0}
-  .space{height:2px;margin:18px 0;background:linear-gradient(90deg,transparent,#47b6ff,#ff5bd1,transparent);opacity:.6;animation:move 8s linear infinite}
+  .space{height:2px; margin:18px 0; background:linear-gradient(90deg,transparent,#47b6ff,#ff5bd1,transparent); opacity:.6; animation:move 8s linear infinite}
   @keyframes move{to{background-position:1200px 0}}
+  footer{color:var(--muted); text-align:center; padding:30px 0}
+  a{color:#8acbff}
+  progress{width:240px; height:12px}
 </style>
 </head>
 <body>
 <header>
   <h1>Rants' Metadata Editor</h1>
-  <div class="subtitle">IL2CPP <span class="mono">global-metadata.dat</span> — inspect header • edit strings in place • export safely</div>
+  <div class="subtitle">IL2CPP <span class="mono">global-metadata.dat</span> — stream-scan • page millions of strings • in-place edit • export safely</div>
 </header>
+
 <main>
   <div class="card">
     <div class="bar">
       <button id="openBtn" class="btn">📂 Open global-metadata.dat</button>
       <input id="fileInput" type="file" accept=".dat,.bin" hidden />
-      <input id="search" class="text" placeholder="Search strings…" />
+      <input id="search" class="text" placeholder="Search visible page…" />
+      <select id="pageSize" class="sel">
+        <option value="250">250 / page</option>
+        <option value="500" selected>500 / page</option>
+        <option value="1000">1000 / page</option>
+      </select>
+      <button id="prevBtn" class="btn">⬅️ Prev</button>
+      <button id="nextBtn" class="btn">➡️ Next</button>
+      <span class="hint" id="pageInfo">Page 0 / 0</span>
       <button id="exportBtn" class="btn primary">⬇️ Download patched .dat</button>
-      <span id="count" class="hint">0 strings</span>
     </div>
-    <div class="grid" style="max-height:55vh;overflow:auto">
+
+    <div class="footerbar" style="gap:14px; margin-top:8px">
+      <span class="hint" id="status">Drop a file or click “Open”.</span>
+      <span class="hint">Strings: <b id="totalCount">0</b></span>
+      <span class="hint">Heap: <span id="heapRange">–</span></span>
+      <span class="hint">Version: <span id="ver">–</span></span>
+      <span class="hint">Sanity: <span id="sanity">–</span></span>
+      <progress id="progress" max="100" value="0" style="display:none"></progress>
+    </div>
+
+    <div class="grid" style="max-height:60vh; overflow:auto">
       <table>
-        <thead><tr><th>Offset</th><th>Bytes</th><th>Original</th><th>Edited</th><th>Actions</th></tr></thead>
+        <thead><tr>
+          <th style="width:120px">Offset</th>
+          <th style="width:90px">Bytes</th>
+          <th>Original</th>
+          <th>Edited (≤ bytes)</th>
+          <th style="width:190px">Actions</th>
+        </tr></thead>
         <tbody id="tbody"></tbody>
       </table>
     </div>
-    <div class="hint" id="status">Drop a file or click “Open”.</div>
+    <div class="hint" style="margin-top:6px">
+      ⚠️ In-place edits only. New text must be ≤ original byte length; shorter text is zero-padded with a trailing <span class="mono">\0</span>.
+    </div>
   </div>
+
   <div class="space"></div>
-  <footer>Made for <a href="https://rantsszi.github.io/rants-metadata-editor/" style="color:#47b6ff">rantsszi.github.io/rants-metadata-editor</a></footer>
+
+  <div class="card">
+    <details>
+      <summary style="cursor:pointer; font-weight:600">Header (advanced)</summary>
+      <pre id="headerDump" class="mono" style="white-space:pre-wrap; background:#0a0f29; border:1px solid #223077; padding:12px; border-radius:8px; overflow:auto; max-height:40vh"></pre>
+    </details>
+  </div>
+
+  <footer>
+    Made for <a href="https://rantsszi.github.io/rants-metadata-editor/">rantsszi.github.io/rants-metadata-editor</a>. Use responsibly.
+  </footer>
 </main>
 
 <script>
 (() => {
-const $=id=>document.getElementById(id);
-const fileInput=$('fileInput'),openBtn=$('openBtn'),tbody=$('tbody'),
-      exportBtn=$('exportBtn'),status=$('status'),countEl=$('count'),search=$('search');
-let u8,dv,workBuf,strings=[],currentList=[],rendered=0,chunkSize=200;
+'use strict';
 
-function setStatus(t,c=''){status.textContent=t;status.className='hint '+c;}
-function readI32(o){return dv.getInt32(o,true);}
-function hex(n){return '0x'+(n>>>0).toString(16).padStart(8,'0');}
-function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m]));}
-function escapeAttr(s){return String(s).replace(/"/g,'&quot;');}
+const $ = id => document.getElementById(id);
 
+const fileInput = $('fileInput'), openBtn = $('openBtn');
+const tbody = $('tbody'), status = $('status'), headerDump = $('headerDump');
+const progress = $('progress'), totalCountEl = $('totalCount'), heapRange = $('heapRange');
+const verEl = $('ver'), sanityEl = $('sanity');
+const exportBtn = $('exportBtn'), search = $('search');
+const prevBtn = $('prevBtn'), nextBtn = $('nextBtn'), pageInfo = $('pageInfo'), pageSizeSel = $('pageSize');
+
+let originalBuf = null, originalU8 = null;
+let workBuf = null, u8 = null, dv = null;
+
+// String indexing
+let stringStart = 0, stringEnd = 0;
+let countPassDone = false, indexPassDone = false;
+let totalStrings = 0;
+let offsets = null; // Uint32Array of string start offsets (no lengths) — length computed on demand
+let page = 0, pageSize = 500;
+
+// Helpers
+function setStatus(msg, cls=''){ status.textContent = msg; status.className = 'hint ' + cls; }
+function readI32(off){ return dv.getInt32(off, true); }
+function hex(n){ return '0x' + (n>>>0).toString(16).padStart(8,'0'); }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+function escapeAttr(s){ return String(s).replace(/"/g,'&quot;'); }
+
+// Header detection (broad heuristics across versions)
 function detectHeader(){
-  const sanity=readI32(0),version=readI32(4);
-  const map={sanity,version};
-  let off=8;
-  for(let i=0;i<60;i++){map['f'+i+'Offset']=readI32(off);map['f'+i+'Count']=readI32(off+4);off+=8;}
-  const offsets=Object.values(map).filter(v=>v>0&&v<workBuf.byteLength).sort((a,b)=>a-b);
-  const stringStart=map.f4Offset||map.f6Offset||map.f8Offset||0;
-  let stringEnd=workBuf.byteLength;
-  for(const o of offsets){if(o>stringStart){stringEnd=o;break;}}
-  return {map,stringStart,stringEnd};
+  const sanity = readI32(0);   // expect 0xFAB11BAF
+  const version = readI32(4);  // typically 24..29+
+  // Read many (offset,count) pairs — labels unknown across versions, so index by position.
+  const map = { sanity, version };
+  let off = 8;
+  for (let i=0;i<64;i++){
+    map[`f${i}Offset`] = readI32(off);     // offset
+    map[`f${i}Count`]  = readI32(off+4);   // count/size
+    off += 8;
+  }
+  // Try common slots that hold string-heap (varies by version)
+  const candidates = [
+    'f4Offset','f6Offset','f8Offset','f10Offset','f12Offset',
+    'stringOffset','stringLiteralDataOffset'
+  ].map(k => map[k]).filter(v => typeof v === 'number' && v > 0 && v < workBuf.byteLength);
+  const start = (candidates.length ? Math.min(...candidates) : 0);
+
+  // End = next section offset after start
+  const offs = Object.keys(map).filter(k=>k.endsWith('Offset'))
+    .map(k=>map[k]).filter(v=>v>0 && v<workBuf.byteLength).sort((a,b)=>a-b);
+  let end = workBuf.byteLength;
+  for (const o of offs){ if (o > start){ end = o; break; } }
+
+  return {map, start, end};
 }
 
-function decodeCString(start,max){
-  let end=start;while(end<max&&u8[end]!==0)end++;
-  const bytes=u8.slice(start,end);
-  const text=new TextDecoder().decode(bytes);
-  return {text,bytesLength:bytes.length,endPlus1:Math.min(end+1,max)};
+function dumpHeader(map){
+  const lines = [];
+  lines.push(`sanity: ${hex(map.sanity)} ${map.sanity===0xFAB11BAF?'(OK)':'(?)'}`);
+  lines.push(`version: ${map.version}`);
+  Object.keys(map).forEach(k=>{
+    if (k==='sanity'||k==='version') return;
+    lines.push(`${k}: ${map[k]}`);
+  });
+  headerDump.textContent = lines.join('\n');
 }
-function scanStrings(start,end){
-  const out=[];let p=start;const lim=Math.min(end,u8.length);
-  while(p<lim){if(u8[p]===0){p++;continue;}
-    const {text,bytesLength,endPlus1}=decodeCString(p,lim);
-    if(bytesLength>0)out.push({offset:p,bytes:bytesLength+1,text,edited:text});
-    p=endPlus1;}
-  return out;
-}
-function trimToUtf8Bytes(str,max){
-  const e=new TextEncoder();let l=0,h=str.length;
-  while(l<h){const m=Math.ceil((l+h)/2);
-    if(e.encode(str.slice(0,m)).length<=max)l=m;else h=m-1;}
-  return str.slice(0,l);
-}
-function applyEdit(r,newText){
-  const enc=new TextEncoder();const b=enc.encode(newText);
-  if(b.length>r.bytes-1)return;
-  u8.fill(0,r.offset,r.offset+r.bytes);u8.set(b,r.offset);
-  r.edited=newText;setStatus(`Edited ${hex(r.offset)} (${b.length}/${r.bytes-1})`,'ok');
-}
-function zeroOut(r){u8.fill(0,r.offset,r.offset+r.bytes);r.edited='';setStatus(`Zeroed ${hex(r.offset)}`,'warn');}
 
-function renderRows(list){tbody.innerHTML='';rendered=0;currentList=list;renderNextChunk();}
-function renderNextChunk(){
-  const frag=document.createDocumentFragment();
-  const slice=currentList.slice(rendered,rendered+chunkSize);
-  for(const r of slice){
-    const tr=document.createElement('tr');
-    tr.innerHTML=`
-      <td class="mono">${hex(r.offset)}</td>
-      <td class="mono">${r.bytes}</td>
-      <td class="mono">${escapeHtml(r.text)}</td>
-      <td><input class="cell mono edit" maxlength="${r.bytes-1}" value="${escapeAttr(r.edited)}"></td>
-      <td><button class="btn mini" data-act="apply">Apply</button>
-          <button class="btn mini" data-act="revert">Revert</button>
-          <button class="btn mini danger" data-act="zero">Zero</button></td>`;
-    const input=tr.querySelector('.edit');
-    input.addEventListener('input',()=>{if(new TextEncoder().encode(input.value).length>r.bytes-1)
-      input.value=trimToUtf8Bytes(input.value,r.bytes-1);});
-    tr.querySelector('[data-act="apply"]').onclick=()=>applyEdit(r,input.value);
-    tr.querySelector('[data-act="revert"]').onclick=()=>{input.value=r.text;applyEdit(r,r.text);};
-    tr.querySelector('[data-act="zero"]').onclick=()=>zeroOut(r);
+// Count strings pass (no allocations except a counter). Yields to the UI.
+async function countStringsPass(start, end){
+  totalStrings = 0;
+  const limit = Math.min(end, u8.length);
+  let p = start;
+  progress.style.display = '';
+  progress.value = 0;
+  const totalSpan = limit - start;
+
+  while (p < limit){
+    if (u8[p] === 0){ p++; }
+    else {
+      // walk to null terminator
+      while (p < limit && u8[p] !== 0) p++;
+      totalStrings++;
+      if (p < limit) p++; // skip terminator
+    }
+    // Yield every ~1MB of scanning
+    if (((p - start) & 0xFFFFF) === 0){
+      progress.value = Math.floor(((p - start) / totalSpan) * 100);
+      await new Promise(r=>setTimeout(r,0));
+    }
+  }
+  countPassDone = true;
+  progress.value = 100;
+}
+
+// Build compact offsets index (Uint32Array). Two-pass to avoid massive JS object allocations.
+async function buildOffsetsIndex(start, end){
+  const limit = Math.min(end, u8.length);
+  offsets = new Uint32Array(totalStrings);
+  let p = start, idx = 0;
+  progress.value = 0;
+
+  while (p < limit && idx < totalStrings){
+    if (u8[p] === 0){ p++; }
+    else {
+      offsets[idx++] = p >>> 0;
+      while (p < limit && u8[p] !== 0) p++;
+      if (p < limit) p++; // skip null
+    }
+    if (((p - start) & 0xFFFFF) === 0){
+      progress.value = Math.floor(((p - start) / (limit - start)) * 100);
+      await new Promise(r=>setTimeout(r,0));
+    }
+  }
+  indexPassDone = true;
+  progress.style.display = 'none';
+}
+
+// Compute length in bytes (including null) for a string starting at offset s
+function cStringByteLength(start){
+  let p = start;
+  const limit = u8.length;
+  while (p < limit && u8[p] !== 0) p++;
+  return (p - start) + 1; // include terminator
+}
+
+function decodeCString(start){
+  let p = start;
+  const limit = u8.length;
+  while (p < limit && u8[p] !== 0) p++;
+  return new TextDecoder().decode(u8.subarray(start, p));
+}
+
+function trimToUtf8Bytes(str, max){
+  const enc = new TextEncoder();
+  let lo=0, hi=str.length;
+  while (lo < hi){
+    const mid = Math.ceil((lo+hi)/2);
+    if (enc.encode(str.slice(0,mid)).length <= max) lo = mid; else hi = mid-1;
+  }
+  return str.slice(0, lo);
+}
+
+function applyEdit(start, maxBytes, newText){
+  const enc = new TextEncoder();
+  const bytes = enc.encode(newText);
+  if (bytes.length > maxBytes) return false;
+  u8.fill(0, start, start + maxBytes + 1);  // zero full region (incl. terminator area)
+  u8.set(bytes, start);
+  return true;
+}
+
+function revertAt(start){
+  // decode original from originalU8 and write back to u8
+  let p = start;
+  while (p < originalU8.length && originalU8[p] !== 0) p++;
+  const orig = originalU8.subarray(start, p);
+  u8.fill(0, start, start + orig.length + 1);
+  u8.set(orig, start);
+  return true;
+}
+
+// Paging + rendering (only decode visible rows)
+function updatePageInfo(){
+  const pages = totalStrings ? Math.ceil(totalStrings / pageSize) : 0;
+  pageInfo.textContent = `Page ${pages ? (page+1) : 0} / ${pages}`;
+  prevBtn.disabled = (page <= 0);
+  nextBtn.disabled = (page >= pages - 1);
+}
+
+function renderPage(){
+  if (!offsets) return;
+  tbody.innerHTML = '';
+  const startIdx = page * pageSize;
+  const endIdx = Math.min(startIdx + pageSize, totalStrings);
+
+  const frag = document.createDocumentFragment();
+  for (let i = startIdx; i < endIdx; i++){
+    const off = offsets[i] >>> 0;
+    const bytes = cStringByteLength(off);
+    const orig = decodeCString(off);
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${hex(off)}</td>
+      <td class="mono">${bytes}</td>
+      <td class="mono">${escapeHtml(orig)}</td>
+      <td><input class="cell mono edit" maxlength="${Math.max(0,bytes-1)}" value="${escapeAttr(orig)}" /></td>
+      <td>
+        <button class="btn mini" data-act="apply">Apply</button>
+        <button class="btn mini" data-act="revert">Revert</button>
+        <button class="btn mini danger" data-act="zero">Zero</button>
+      </td>
+    `;
+    const input = tr.querySelector('.edit');
+    input.addEventListener('input', ()=>{
+      if (new TextEncoder().encode(input.value).length > bytes-1){
+        input.value = trimToUtf8Bytes(input.value, bytes-1);
+      }
+    });
+    tr.querySelector('[data-act="apply"]').onclick = ()=>{
+      if (applyEdit(off, bytes-1, input.value)){
+        setStatus(`Edited ${hex(off)} (${new TextEncoder().encode(input.value).length}/${bytes-1} bytes)`, 'ok');
+      }
+    };
+    tr.querySelector('[data-act="revert"]').onclick = ()=>{
+      revertAt(off);
+      input.value = decodeCString(off);
+      setStatus(`Reverted ${hex(off)} to original.`, 'ok');
+    };
+    tr.querySelector('[data-act="zero"]').onclick = ()=>{
+      u8.fill(0, off, off + bytes);
+      input.value = '';
+      setStatus(`Zeroed ${hex(off)} (${bytes} bytes).`, 'warn');
+    };
+
     frag.appendChild(tr);
   }
   tbody.appendChild(frag);
-  rendered+=slice.length;
-  if(rendered<currentList.length){
-    const more=document.createElement('tr');
-    more.innerHTML=`<td colspan="5" style="text-align:center">
-      <button id="loadMoreBtn" class="btn">Load more (${currentList.length-rendered})</button></td>`;
-    tbody.appendChild(more);
-    more.querySelector('#loadMoreBtn').onclick=()=>{more.remove();requestAnimationFrame(renderNextChunk);};
+  updatePageInfo();
+}
+
+function applySearchFilter(){
+  // Search only within current page to avoid heavy global scanning
+  const val = search.value.trim();
+  if (!val){ renderPage(); return; }
+  let rx;
+  try { rx = new RegExp(val, 'i'); }
+  catch { setStatus('Invalid regex in search box.', 'bad'); return; }
+
+  // Render filtered items from current page
+  tbody.innerHTML = '';
+  const startIdx = page * pageSize;
+  const endIdx = Math.min(startIdx + pageSize, totalStrings);
+  const frag = document.createDocumentFragment();
+  let shown = 0;
+
+  for (let i = startIdx; i < endIdx; i++){
+    const off = offsets[i] >>> 0;
+    const bytes = cStringByteLength(off);
+    const orig = decodeCString(off);
+    if (!rx.test(orig)) continue;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${hex(off)}</td>
+      <td class="mono">${bytes}</td>
+      <td class="mono">${escapeHtml(orig)}</td>
+      <td><input class="cell mono edit" maxlength="${Math.max(0,bytes-1)}" value="${escapeAttr(orig)}" /></td>
+      <td>
+        <button class="btn mini" data-act="apply">Apply</button>
+        <button class="btn mini" data-act="revert">Revert</button>
+        <button class="btn mini danger" data-act="zero">Zero</button>
+      </td>
+    `;
+    const input = tr.querySelector('.edit');
+    input.addEventListener('input', ()=>{
+      if (new TextEncoder().encode(input.value).length > bytes-1){
+        input.value = trimToUtf8Bytes(input.value, bytes-1);
+      }
+    });
+    tr.querySelector('[data-act="apply"]').onclick = ()=>{
+      if (applyEdit(off, bytes-1, input.value)){
+        setStatus(`Edited ${hex(off)} (${new TextEncoder().encode(input.value).length}/${bytes-1} bytes)`, 'ok');
+      }
+    };
+    tr.querySelector('[data-act="revert"]').onclick = ()=>{
+      revertAt(off);
+      input.value = decodeCString(off);
+      setStatus(`Reverted ${hex(off)} to original.`, 'ok');
+    };
+    tr.querySelector('[data-act="zero"]').onclick = ()=>{
+      u8.fill(0, off, off + bytes);
+      input.value = '';
+      setStatus(`Zeroed ${hex(off)} (${bytes} bytes).`, 'warn');
+    };
+
+    frag.appendChild(tr);
+    shown++;
   }
+  tbody.appendChild(frag);
+  setStatus(`Filtered page results: ${shown}`, 'ok');
 }
-function applyFilter(){
-  const val=search.value.trim();
-  if(!val){renderRows(strings);countEl.textContent=strings.length+' strings';return;}
-  let rx;try{rx=new RegExp(val,'i');}catch{setStatus('Invalid regex','bad');return;}
-  const filtered=strings.filter(r=>rx.test(r.text)||rx.test(r.edited));
-  renderRows(filtered);countEl.textContent=filtered.length+' strings';
-}
+
 function exportPatched(){
-  const blob=new Blob([workBuf],{type:'application/octet-stream'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);a.download='global-metadata.patched.dat';a.click();
-  setStatus('Patched file downloaded.','ok');
+  const blob = new Blob([workBuf], {type:'application/octet-stream'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'global-metadata.patched.dat';
+  a.click();
+  setStatus('Patched file downloaded.', 'ok');
 }
 
-async function loadFile(f){
-  const buf=await f.arrayBuffer();workBuf=buf.slice(0);
-  u8=new Uint8Array(workBuf);dv=new DataView(workBuf);
-  const {stringStart,stringEnd}=detectHeader();
-  strings=scanStrings(stringStart,stringEnd);
-  renderRows(strings);countEl.textContent=strings.length+' strings';
-  setStatus(`Loaded ${f.name} (${strings.length} strings)`,'ok');
+// Load & process file
+async function loadFile(file){
+  setStatus(`Reading ${file.name}…`);
+  originalBuf = await file.arrayBuffer();
+  workBuf = originalBuf.slice(0); // copy
+  originalU8 = new Uint8Array(originalBuf);
+  u8 = new Uint8Array(workBuf);
+  dv = new DataView(workBuf);
+
+  const {map, start, end} = detectHeader();
+  stringStart = start; stringEnd = end;
+  verEl.textContent = map.version ?? '–';
+  sanityEl.textContent = hex(map.sanity);
+  heapRange.textContent = `${hex(start)} → ${hex(end)} (${end-start} bytes)`;
+  dumpHeader(map);
+
+  if (map.sanity !== 0xFAB11BAF){
+    setStatus('Warning: unexpected sanity magic. File may not be IL2CPP metadata.', 'warn');
+  }
+
+  setStatus('Counting strings (pass 1)…', '');
+  await countStringsPass(stringStart, stringEnd);
+  totalCountEl.textContent = String(totalStrings);
+
+  setStatus('Indexing strings (pass 2)…', '');
+  await buildOffsetsIndex(stringStart, stringEnd);
+
+  // Reset paging
+  page = 0;
+  pageSize = parseInt(pageSizeSel.value, 10);
+  renderPage();
+  setStatus(`Loaded ${file.name} • ${totalStrings} strings indexed.`, 'ok');
 }
 
-openBtn.onclick=()=>fileInput.click();
-fileInput.onchange=e=>{const f=e.target.files?.[0];if(f)loadFile(f);};
-window.addEventListener('dragover',e=>e.preventDefault());
-window.addEventListener('drop',e=>{e.preventDefault();const f=e.dataTransfer.files?.[0];if(f)loadFile(f);});
-search.addEventListener('input',applyFilter);
-exportBtn.onclick=exportPatched;
+// UI wires
+openBtn.onclick = () => fileInput.click();
+fileInput.onchange = e => { const f = e.target.files?.[0]; if (f) loadFile(f); };
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) loadFile(f); });
+
+prevBtn.onclick = () => { if (page>0){ page--; renderPage(); } };
+nextBtn.onclick = () => { const pages = Math.ceil(totalStrings / pageSize); if (page < pages-1){ page++; renderPage(); } };
+pageSizeSel.onchange = () => { pageSize = parseInt(pageSizeSel.value,10)||500; page = 0; renderPage(); };
+search.addEventListener('input', applySearchFilter);
+exportBtn.onclick = exportPatched;
+
 })();
 </script>
 </body>
