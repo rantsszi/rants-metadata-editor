@@ -82,6 +82,8 @@
       <button id="openBtn" class="btn">📂 Open global-metadata.dat</button>
       <input id="fileInput" type="file" accept=".dat,.bin" hidden />
       <input id="search" class="text" placeholder="Search visible page…" />
+      <!-- NEW: Show All toggle button here -->
+      <button id="toggleAllBtn" class="btn warn">💥 Show All Strings (may lag)</button>
       <select id="pageSize" class="sel">
         <option value="250">250 / page</option>
         <option value="500" selected>500 / page</option>
@@ -102,7 +104,8 @@
       <progress id="progress" max="100" value="0" style="display:none"></progress>
     </div>
 
-    <div class="grid" style="max-height:60vh; overflow:auto">
+    <!-- give the scroll container an id so we can manage scroll behavior -->
+    <div id="tableScroll" class="grid" style="max-height:60vh; overflow:auto">
       <table>
         <thead><tr>
           <th style="width:120px">Offset</th>
@@ -145,16 +148,21 @@ const progress = $('progress'), totalCountEl = $('totalCount'), heapRange = $('h
 const verEl = $('ver'), sanityEl = $('sanity');
 const exportBtn = $('exportBtn'), search = $('search');
 const prevBtn = $('prevBtn'), nextBtn = $('nextBtn'), pageInfo = $('pageInfo'), pageSizeSel = $('pageSize');
+const toggleAllBtn = $('toggleAllBtn'), tableScroll = $('tableScroll');
 
 let originalBuf = null, originalU8 = null;
 let workBuf = null, u8 = null, dv = null;
 
 // String indexing
 let stringStart = 0, stringEnd = 0;
-let countPassDone = false, indexPassDone = false;
 let totalStrings = 0;
-let offsets = null; // Uint32Array of string start offsets (no lengths) — length computed on demand
+let offsets = null; // Uint32Array of string start offsets (no lengths)
 let page = 0, pageSize = 500;
+
+// Full-view state
+let fullView = false;
+let prevPageBeforeFull = 0;
+let fullRenderAbort = null; // function to abort chunked rendering
 
 // Helpers
 function setStatus(msg, cls=''){ status.textContent = msg; status.className = 'hint ' + cls; }
@@ -165,24 +173,21 @@ function escapeAttr(s){ return String(s).replace(/"/g,'&quot;'); }
 
 // Header detection (broad heuristics across versions)
 function detectHeader(){
-  const sanity = readI32(0);   // expect 0xFAB11BAF
-  const version = readI32(4);  // typically 24..29+
-  // Read many (offset,count) pairs — labels unknown across versions, so index by position.
+  const sanity = readI32(0);
+  const version = readI32(4);
   const map = { sanity, version };
   let off = 8;
   for (let i=0;i<64;i++){
-    map[`f${i}Offset`] = readI32(off);     // offset
-    map[`f${i}Count`]  = readI32(off+4);   // count/size
+    map[`f${i}Offset`] = readI32(off);
+    map[`f${i}Count`]  = readI32(off+4);
     off += 8;
   }
-  // Try common slots that hold string-heap (varies by version)
   const candidates = [
     'f4Offset','f6Offset','f8Offset','f10Offset','f12Offset',
     'stringOffset','stringLiteralDataOffset'
   ].map(k => map[k]).filter(v => typeof v === 'number' && v > 0 && v < workBuf.byteLength);
   const start = (candidates.length ? Math.min(...candidates) : 0);
 
-  // End = next section offset after start
   const offs = Object.keys(map).filter(k=>k.endsWith('Offset'))
     .map(k=>map[k]).filter(v=>v>0 && v<workBuf.byteLength).sort((a,b)=>a-b);
   let end = workBuf.byteLength;
@@ -202,7 +207,7 @@ function dumpHeader(map){
   headerDump.textContent = lines.join('\n');
 }
 
-// Count strings pass (no allocations except a counter). Yields to the UI.
+// Pass 1: count
 async function countStringsPass(start, end){
   totalStrings = 0;
   const limit = Math.min(end, u8.length);
@@ -210,63 +215,54 @@ async function countStringsPass(start, end){
   progress.style.display = '';
   progress.value = 0;
   const totalSpan = limit - start;
-
   while (p < limit){
     if (u8[p] === 0){ p++; }
     else {
-      // walk to null terminator
       while (p < limit && u8[p] !== 0) p++;
       totalStrings++;
-      if (p < limit) p++; // skip terminator
+      if (p < limit) p++;
     }
-    // Yield every ~1MB of scanning
     if (((p - start) & 0xFFFFF) === 0){
       progress.value = Math.floor(((p - start) / totalSpan) * 100);
       await new Promise(r=>setTimeout(r,0));
     }
   }
-  countPassDone = true;
   progress.value = 100;
 }
 
-// Build compact offsets index (Uint32Array). Two-pass to avoid massive JS object allocations.
+// Pass 2: index offsets
 async function buildOffsetsIndex(start, end){
   const limit = Math.min(end, u8.length);
   offsets = new Uint32Array(totalStrings);
   let p = start, idx = 0;
   progress.value = 0;
-
   while (p < limit && idx < totalStrings){
     if (u8[p] === 0){ p++; }
     else {
       offsets[idx++] = p >>> 0;
       while (p < limit && u8[p] !== 0) p++;
-      if (p < limit) p++; // skip null
+      if (p < limit) p++;
     }
     if (((p - start) & 0xFFFFF) === 0){
       progress.value = Math.floor(((p - start) / (limit - start)) * 100);
       await new Promise(r=>setTimeout(r,0));
     }
   }
-  indexPassDone = true;
   progress.style.display = 'none';
 }
 
-// Compute length in bytes (including null) for a string starting at offset s
 function cStringByteLength(start){
   let p = start;
   const limit = u8.length;
   while (p < limit && u8[p] !== 0) p++;
-  return (p - start) + 1; // include terminator
+  return (p - start) + 1;
 }
-
 function decodeCString(start){
   let p = start;
   const limit = u8.length;
   while (p < limit && u8[p] !== 0) p++;
   return new TextDecoder().decode(u8.subarray(start, p));
 }
-
 function trimToUtf8Bytes(str, max){
   const enc = new TextEncoder();
   let lo=0, hi=str.length;
@@ -276,18 +272,15 @@ function trimToUtf8Bytes(str, max){
   }
   return str.slice(0, lo);
 }
-
 function applyEdit(start, maxBytes, newText){
   const enc = new TextEncoder();
   const bytes = enc.encode(newText);
   if (bytes.length > maxBytes) return false;
-  u8.fill(0, start, start + maxBytes + 1);  // zero full region (incl. terminator area)
+  u8.fill(0, start, start + maxBytes + 1);
   u8.set(bytes, start);
   return true;
 }
-
 function revertAt(start){
-  // decode original from originalU8 and write back to u8
   let p = start;
   while (p < originalU8.length && originalU8[p] !== 0) p++;
   const orig = originalU8.subarray(start, p);
@@ -296,128 +289,91 @@ function revertAt(start){
   return true;
 }
 
-// Paging + rendering (only decode visible rows)
+// Paging
 function updatePageInfo(){
   const pages = totalStrings ? Math.ceil(totalStrings / pageSize) : 0;
   pageInfo.textContent = `Page ${pages ? (page+1) : 0} / ${pages}`;
-  prevBtn.disabled = (page <= 0);
-  nextBtn.disabled = (page >= pages - 1);
+  prevBtn.disabled = fullView || (page <= 0);
+  nextBtn.disabled = fullView || (page >= pages - 1);
+  pageSizeSel.disabled = fullView ? true : false; // keep visible but disabled in full view
 }
-
+function renderRow(off){
+  const bytes = cStringByteLength(off);
+  const orig = decodeCString(off);
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td class="mono">${hex(off)}</td>
+    <td class="mono">${bytes}</td>
+    <td class="mono">${escapeHtml(orig)}</td>
+    <td><input class="cell mono edit" maxlength="${Math.max(0,bytes-1)}" value="${escapeAttr(orig)}" /></td>
+    <td>
+      <button class="btn mini" data-act="apply">Apply</button>
+      <button class="btn mini" data-act="revert">Revert</button>
+      <button class="btn mini danger" data-act="zero">Zero</button>
+    </td>
+  `;
+  const input = tr.querySelector('.edit');
+  input.addEventListener('input', ()=>{
+    if (new TextEncoder().encode(input.value).length > bytes-1){
+      input.value = trimToUtf8Bytes(input.value, bytes-1);
+    }
+  });
+  tr.querySelector('[data-act="apply"]').onclick = ()=>{
+    if (applyEdit(off, bytes-1, input.value)){
+      setStatus(`Edited ${hex(off)} (${new TextEncoder().encode(input.value).length}/${bytes-1} bytes)`, 'ok');
+    }
+  };
+  tr.querySelector('[data-act="revert"]').onclick = ()=>{
+    revertAt(off);
+    input.value = decodeCString(off);
+    setStatus(`Reverted ${hex(off)} to original.`, 'ok');
+  };
+  tr.querySelector('[data-act="zero"]').onclick = ()=>{
+    u8.fill(0, off, off + bytes);
+    input.value = '';
+    setStatus(`Zeroed ${hex(off)} (${bytes} bytes).`, 'warn');
+  };
+  return tr;
+}
 function renderPage(){
-  if (!offsets) return;
+  if (!offsets || fullView) return;
   tbody.innerHTML = '';
   const startIdx = page * pageSize;
   const endIdx = Math.min(startIdx + pageSize, totalStrings);
-
   const frag = document.createDocumentFragment();
   for (let i = startIdx; i < endIdx; i++){
-    const off = offsets[i] >>> 0;
-    const bytes = cStringByteLength(off);
-    const orig = decodeCString(off);
-
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td class="mono">${hex(off)}</td>
-      <td class="mono">${bytes}</td>
-      <td class="mono">${escapeHtml(orig)}</td>
-      <td><input class="cell mono edit" maxlength="${Math.max(0,bytes-1)}" value="${escapeAttr(orig)}" /></td>
-      <td>
-        <button class="btn mini" data-act="apply">Apply</button>
-        <button class="btn mini" data-act="revert">Revert</button>
-        <button class="btn mini danger" data-act="zero">Zero</button>
-      </td>
-    `;
-    const input = tr.querySelector('.edit');
-    input.addEventListener('input', ()=>{
-      if (new TextEncoder().encode(input.value).length > bytes-1){
-        input.value = trimToUtf8Bytes(input.value, bytes-1);
-      }
-    });
-    tr.querySelector('[data-act="apply"]').onclick = ()=>{
-      if (applyEdit(off, bytes-1, input.value)){
-        setStatus(`Edited ${hex(off)} (${new TextEncoder().encode(input.value).length}/${bytes-1} bytes)`, 'ok');
-      }
-    };
-    tr.querySelector('[data-act="revert"]').onclick = ()=>{
-      revertAt(off);
-      input.value = decodeCString(off);
-      setStatus(`Reverted ${hex(off)} to original.`, 'ok');
-    };
-    tr.querySelector('[data-act="zero"]').onclick = ()=>{
-      u8.fill(0, off, off + bytes);
-      input.value = '';
-      setStatus(`Zeroed ${hex(off)} (${bytes} bytes).`, 'warn');
-    };
-
-    frag.appendChild(tr);
+    frag.appendChild(renderRow(offsets[i] >>> 0));
   }
   tbody.appendChild(frag);
+  tableScroll.scrollTop = 0; // go to top of page
   updatePageInfo();
 }
 
+// Page-local search
 function applySearchFilter(){
-  // Search only within current page to avoid heavy global scanning
+  if (fullView){ return; } // in full view, prefer browser Ctrl+F
   const val = search.value.trim();
   if (!val){ renderPage(); return; }
   let rx;
   try { rx = new RegExp(val, 'i'); }
   catch { setStatus('Invalid regex in search box.', 'bad'); return; }
-
-  // Render filtered items from current page
   tbody.innerHTML = '';
   const startIdx = page * pageSize;
   const endIdx = Math.min(startIdx + pageSize, totalStrings);
   const frag = document.createDocumentFragment();
   let shown = 0;
-
   for (let i = startIdx; i < endIdx; i++){
     const off = offsets[i] >>> 0;
-    const bytes = cStringByteLength(off);
-    const orig = decodeCString(off);
-    if (!rx.test(orig)) continue;
-
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td class="mono">${hex(off)}</td>
-      <td class="mono">${bytes}</td>
-      <td class="mono">${escapeHtml(orig)}</td>
-      <td><input class="cell mono edit" maxlength="${Math.max(0,bytes-1)}" value="${escapeAttr(orig)}" /></td>
-      <td>
-        <button class="btn mini" data-act="apply">Apply</button>
-        <button class="btn mini" data-act="revert">Revert</button>
-        <button class="btn mini danger" data-act="zero">Zero</button>
-      </td>
-    `;
-    const input = tr.querySelector('.edit');
-    input.addEventListener('input', ()=>{
-      if (new TextEncoder().encode(input.value).length > bytes-1){
-        input.value = trimToUtf8Bytes(input.value, bytes-1);
-      }
-    });
-    tr.querySelector('[data-act="apply"]').onclick = ()=>{
-      if (applyEdit(off, bytes-1, input.value)){
-        setStatus(`Edited ${hex(off)} (${new TextEncoder().encode(input.value).length}/${bytes-1} bytes)`, 'ok');
-      }
-    };
-    tr.querySelector('[data-act="revert"]').onclick = ()=>{
-      revertAt(off);
-      input.value = decodeCString(off);
-      setStatus(`Reverted ${hex(off)} to original.`, 'ok');
-    };
-    tr.querySelector('[data-act="zero"]').onclick = ()=>{
-      u8.fill(0, off, off + bytes);
-      input.value = '';
-      setStatus(`Zeroed ${hex(off)} (${bytes} bytes).`, 'warn');
-    };
-
-    frag.appendChild(tr);
+    const str = decodeCString(off);
+    if (!rx.test(str)) continue;
+    frag.appendChild(renderRow(off));
     shown++;
   }
   tbody.appendChild(frag);
   setStatus(`Filtered page results: ${shown}`, 'ok');
 }
 
+// Export
 function exportPatched(){
   const blob = new Blob([workBuf], {type:'application/octet-stream'});
   const a = document.createElement('a');
@@ -427,11 +383,68 @@ function exportPatched(){
   setStatus('Patched file downloaded.', 'ok');
 }
 
+// FULL VIEW (Show All)
+async function enterFullView(){
+  if (!offsets) return;
+  // Confirm, warn about huge DOM
+  const big = totalStrings > 150000;
+  const msg = big
+    ? `You are about to render ALL ${totalStrings.toLocaleString()} strings.\nThis will likely lag or freeze your browser.\nContinue?`
+    : `Render all ${totalStrings.toLocaleString()} strings at once?\nMay lag on large files.`;
+  if (!confirm(msg)) return;
+
+  fullView = true;
+  prevPageBeforeFull = page; // remember where we were
+  toggleAllBtn.textContent = '↩️ Back to Paged View';
+  prevBtn.disabled = nextBtn.disabled = true;
+  pageSizeSel.disabled = true;
+  search.placeholder = 'Use your browser Find (Ctrl+F)…';
+  tbody.innerHTML = '';
+  tableScroll.scrollTop = 0;
+  setStatus('Rendering all strings… this may take a while.', 'warn');
+
+  // chunked render to avoid total lockup
+  let i = 0;
+  const batch = 2000;
+  let aborted = false;
+  fullRenderAbort = ()=>{ aborted = true; };
+  const frag = document.createDocumentFragment();
+
+  const step = () => {
+    if (aborted) return;
+    const end = Math.min(i + batch, totalStrings);
+    for (; i < end; i++){
+      const off = offsets[i] >>> 0;
+      frag.appendChild(renderRow(off));
+    }
+    tbody.appendChild(frag);
+    if (i < totalStrings){
+      if ((i % (batch*10)) === 0) setStatus(`Rendering… ${i.toLocaleString()} / ${totalStrings.toLocaleString()}`, 'warn');
+      requestAnimationFrame(step);
+    } else {
+      setStatus(`All ${totalStrings.toLocaleString()} strings rendered. Use Ctrl+F to search.`, 'ok');
+    }
+  };
+  requestAnimationFrame(step);
+}
+
+function exitFullView(){
+  if (!fullView) return;
+  if (typeof fullRenderAbort === 'function') fullRenderAbort();
+  fullView = false;
+  toggleAllBtn.textContent = '💥 Show All Strings (may lag)';
+  pageSizeSel.disabled = false;
+  search.placeholder = 'Search visible page…';
+  page = prevPageBeforeFull; // restore to page you were on before
+  renderPage();
+  setStatus(`Returned to paged view (page ${page+1}).`, 'ok');
+}
+
 // Load & process file
 async function loadFile(file){
   setStatus(`Reading ${file.name}…`);
   originalBuf = await file.arrayBuffer();
-  workBuf = originalBuf.slice(0); // copy
+  workBuf = originalBuf.slice(0);
   originalU8 = new Uint8Array(originalBuf);
   u8 = new Uint8Array(workBuf);
   dv = new DataView(workBuf);
@@ -454,7 +467,6 @@ async function loadFile(file){
   setStatus('Indexing strings (pass 2)…', '');
   await buildOffsetsIndex(stringStart, stringEnd);
 
-  // Reset paging
   page = 0;
   pageSize = parseInt(pageSizeSel.value, 10);
   renderPage();
@@ -467,11 +479,16 @@ fileInput.onchange = e => { const f = e.target.files?.[0]; if (f) loadFile(f); }
 window.addEventListener('dragover', e => e.preventDefault());
 window.addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) loadFile(f); });
 
-prevBtn.onclick = () => { if (page>0){ page--; renderPage(); } };
-nextBtn.onclick = () => { const pages = Math.ceil(totalStrings / pageSize); if (page < pages-1){ page++; renderPage(); } };
-pageSizeSel.onchange = () => { pageSize = parseInt(pageSizeSel.value,10)||500; page = 0; renderPage(); };
+prevBtn.onclick = () => { if (!fullView && page>0){ page--; renderPage(); } };
+nextBtn.onclick = () => { if (!fullView){ const pages = Math.ceil(totalStrings / pageSize); if (page < pages-1){ page++; renderPage(); } } };
+pageSizeSel.onchange = () => { if (!fullView){ pageSize = parseInt(pageSizeSel.value,10)||500; page = 0; renderPage(); } };
 search.addEventListener('input', applySearchFilter);
 exportBtn.onclick = exportPatched;
+
+toggleAllBtn.onclick = () => {
+  if (!offsets) return;
+  if (!fullView) enterFullView(); else exitFullView();
+};
 
 })();
 </script>
