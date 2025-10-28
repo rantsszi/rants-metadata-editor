@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Rants' Metadata Editor!</title>
+
+<meta name="description" content="Browser-based IL2CPP global-metadata.dat editor: stream-scan header, page through millions of strings, in-place edit, and export." />
+<meta property="og:title" content="Rants' Metadata Editor!" />
+<meta property="og:description" content="Inspect and in-place edit Unity IL2CPP global-metadata.dat strings right in your browser — optimized for huge files." />
+<meta property="og:url" content="https://rantsszi.github.io/rants-modding-help/" />
+
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#070a17; --panel:#12183b; --text:#eaf1ff; --muted:#97a6cf;
+    --neon:#47b6ff; --neon2:#ff5bd1; --ok:#5ff3c1; --bad:#ff6b8a; --warn:#ffd36e;
+    --border:#232c63; --grid:#1b2350;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,Ubuntu,Arial;
+    color:var(--text);
+    background:
+      radial-gradient(1200px 600px at 10% -10%, #17215a55, transparent 60%),
+      radial-gradient(900px 500px at 110% 10%, #38215a55, transparent 60%),
+      linear-gradient(180deg,#070a17,#070a17);
+  }
+  header{padding:56px 16px 20px; text-align:center; position:relative;}
+  header::before{
+    content:""; position:absolute; inset:-40% -40% auto -40%;
+    height:200%; background:conic-gradient(from 0deg,var(--neon),var(--neon2),var(--ok),var(--neon));
+    filter:blur(80px); opacity:.12; animation:spin 14s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  h1{margin:0; font-family:Orbitron,sans-serif; font-weight:800; font-size:2.1rem;
+     text-shadow:0 0 14px #1c7ad8aa, 0 0 30px #1c7ad866;}
+  .subtitle{color:var(--muted); margin-top:10px}
+  main{max-width:1200px; margin:0 auto; padding:20px}
+  .card{background:linear-gradient(180deg,#12183b99,#0b103099);
+        border:1px solid var(--border); border-radius:16px; padding:16px;
+        box-shadow:0 10px 26px rgba(4,7,18,.45);}
+  .bar, .footerbar{
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:center;
+  }
+  .btn,.text,.sel{
+    background:#0b1030; border:1px solid var(--border); color:var(--text);
+    padding:10px 14px; border-radius:10px; font-size:.95rem; cursor:pointer; transition:.18s;
+  }
+  .btn:hover{border-color:var(--neon); box-shadow:0 0 12px #47b6ff66; transform:translateY(-1px)}
+  .btn.primary{background:linear-gradient(135deg,#143a7a,#0c2a5e); border-color:#1b4e9a}
+  .btn.good{background:linear-gradient(135deg,#0f5a4a,#0d4237); border-color:#177c66}
+  .btn.warn{background:linear-gradient(135deg,#6b520e,#493c11); border-color:#7c6516}
+  .btn.danger{background:linear-gradient(135deg,#6d1f3b,#4b162a); border-color:#8a284a}
+  .grid{border:1px solid var(--grid); border-radius:12px; overflow:hidden; margin-top:12px}
+  table{width:100%; border-collapse:separate; border-spacing:0}
+  thead th{background:linear-gradient(180deg,#182155,#111741);
+           padding:10px; text-align:left; font-family:Orbitron; font-size:.85rem; color:#dce7ff}
+  td{padding:8px; border-bottom:1px solid var(--grid)}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+  .cell{width:100%; background:#0a0f29; color:var(--text); border:1px solid #223077;
+        border-radius:8px; padding:8px; font-family:ui-monospace,Menlo,Consolas,monospace}
+  .cell:focus{outline:2px solid var(--neon)}
+  .hint{color:var(--muted); font-size:.9rem}
+  .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)}
+  .space{height:2px; margin:18px 0; background:linear-gradient(90deg,transparent,#47b6ff,#ff5bd1,transparent); opacity:.6; animation:move 8s linear infinite}
+  @keyframes move{to{background-position:1200px 0}}
+  footer{color:var(--muted); text-align:center; padding:30px 0}
+  a{color:#8acbff}
+  progress{width:240px; height:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Rants' Metadata Editor</h1>
+  <div class="subtitle">IL2CPP <span class="mono">global-metadata.dat</span> — stream-scan • page millions of strings • in-place edit • export safely</div>
+</header>
+
+<main>
+  <div class="card">
+    <div class="bar">
+      <button id="openBtn" class="btn">📂 Open global-metadata.dat</button>
+      <input id="fileInput" type="file" accept=".dat,.bin" hidden />
+      <input id="search" class="text" placeholder="Search visible page…" />
+      <button id="toggleAllBtn" class="btn warn">💥 Show All Strings (may lag)</button>
+      <select id="pageSize" class="sel">
+        <option value="250">250 / page</option>
+        <option value="500" selected>500 / page</option>
+        <option value="1000">1000 / page</option>
+      </select>
+      <button id="prevBtn" class="btn">⬅️ Prev</button>
+      <button id="nextBtn" class="btn">➡️ Next</button>
+      <span class="hint" id="pageInfo">Page 0 / 0</span>
+      <button id="exportBtn" class="btn primary">⬇️ Download patched .dat</button>
+    </div>
+
+    <div class="footerbar" style="gap:14px; margin-top:8px">
+      <span class="hint" id="status">Drop a file or click “Open”.</span>
+      <span class="hint">Strings: <b id="totalCount">0</b></span>
+      <span class="hint">Heap: <span id="heapRange">–</span></span>
+      <span class="hint">Version: <span id="ver">–</span></span>
+      <span class="hint">Sanity: <span id="sanity">–</span></span>
+      <progress id="progress" max="100" value="0" style="display:none"></progress>
+    </div>
+
+    <div id="tableScroll" class="grid" style="max-height:60vh; overflow:auto">
+      <table>
+        <thead><tr>
+          <th style="width:120px">Offset</th>
+          <th style="width:90px">Bytes</th>
+          <th>Original</th>
+          <th>Edited (≤ bytes)</th>
+          <th style="width:190px">Actions</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="hint" style="margin-top:6px">
+      ⚠️ In-place edits only. New text must be ≤ original byte length; shorter text is zero-padded with a trailing <span class="mono">\0</span>.
+    </div>
+  </div>
+
+  <div class="space"></div>
+
+  <div class="card">
+    <details>
+      <summary style="cursor:pointer; font-weight:600">Header (advanced)</summary>
+      <pre id="headerDump" class="mono" style="white-space:pre-wrap; background:#0a0f29; border:1px solid #223077; padding:12px; border-radius:8px; overflow:auto; max-height:40vh"></pre>
+    </details>
+  </div>
+
+  <footer>
+    Made for <a href="https://rantsszi.github.io/rants-metadata-editor/">rantsszi.github.io/rants-metadata-editor</a>. Use responsibly.
+  </footer>
+</main>
+
+<script>
+// === all JavaScript code is included inline for simplicity ===
+</script>
+</body>
+</html>
